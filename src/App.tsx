@@ -1,14 +1,25 @@
-import { useState } from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
+import LiveMonitor from './pages/LiveMonitor';
+import QCPortal from './pages/QCPortal';
+import Management from './pages/Management';
+import ScheduleCockpit from './pages/ScheduleCockpit';
+import Analytics from './pages/Analytics';
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="min-h-screen bg-black text-white p-6">
-      <h1 className="text-3xl font-bold">Tailwind 적용</h1>
-      <p className="mt-2 text-gray-400">기본 세팅~~</p>
-    </div>
+    <BrowserRouter>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<LiveMonitor />} />
+          <Route path="/qc-portal" element={<QCPortal />} />
+          <Route path="/management" element={<Management />} />
+          <Route path="/schedule" element={<ScheduleCockpit />} />
+          <Route path="/analytics" element={<Analytics />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
   );
 }
 
-export default App
+export default App;
