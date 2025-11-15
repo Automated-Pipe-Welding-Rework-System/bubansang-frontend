@@ -1,122 +1,228 @@
 /**
  * 페이지 3: 스케줄 조종석 (Schedule Cockpit)
- * 세련된 디자인으로 재구성
+ * 백엔드 API 연동
  */
 
 import { useState } from 'react';
+import { optimizeSchedule } from '../services/scheduleService';
+import type { ScheduleResponse } from '../types/api';
 
 export default function ScheduleCockpit() {
   const [showModal, setShowModal] = useState(false);
+  
+  // 날짜/세션 선택
+  const [targetDate, setTargetDate] = useState<string>(
+    new Date().toISOString().split('T')[0] // 오늘 날짜 (YYYY-MM-DD)
+  );
+  const [targetSession, setTargetSession] = useState<'morning' | 'afternoon' | 'night'>('morning');
+  
+  // 스케줄 상태
+  const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // 스케줄 생성
+  const handleGenerateSchedule = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await optimizeSchedule(targetDate, targetSession);
+      setSchedule(response);
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'Failed to generate schedule');
+      console.error('Error generating schedule:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white p-10">
       <div className="max-w-[1600px] mx-auto">
         {/* 헤더 */}
-        <div className="mb-12 flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Schedule Cockpit</h1>
-            <p className="text-gray-500">AI-powered schedule management</p>
+        <div className="mb-12">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">Schedule Cockpit</h1>
+              <p className="text-gray-500">AI-powered schedule management</p>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                onClick={handleGenerateSchedule}
+                disabled={loading}
+                className="px-6 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-xl font-semibold hover:bg-purple-50 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-purple-600"></div>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined">auto_awesome</span>
+                    Regenerate Schedule
+                  </>
+                )}
+              </button>
+              <button className="px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-semibold hover:from-purple-600 hover:to-purple-700 transition-all shadow-sm flex items-center gap-2">
+                <span className="material-symbols-outlined">check_circle</span>
+                Confirm & Dispatch
+              </button>
+            </div>
           </div>
-          <div className="flex gap-3">
-            <button className="px-6 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-xl font-semibold hover:bg-purple-50 transition-all flex items-center gap-2">
-              <span className="material-symbols-outlined">auto_awesome</span>
-              Regenerate AI Schedule
-            </button>
-            <button className="px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-semibold hover:from-purple-600 hover:to-purple-700 transition-all shadow-sm flex items-center gap-2">
-              <span className="material-symbols-outlined">check_circle</span>
-              Confirm & Dispatch
-            </button>
+          
+          {/* 날짜/세션 선택 */}
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-semibold text-gray-700">Target Date:</label>
+              <input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-semibold text-gray-700">Session:</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setTargetSession('morning')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    targetSession === 'morning'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Morning (09:00-12:00)
+                </button>
+                <button
+                  onClick={() => setTargetSession('afternoon')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    targetSession === 'afternoon'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Afternoon (13:00-18:00)
+                </button>
+                <button
+                  onClick={() => setTargetSession('night')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    targetSession === 'night'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Night (19:00-22:00)
+                </button>
+              </div>
+            </div>
+            
+            {schedule && (
+              <div className="ml-auto flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Batch ID:</span>
+                  <span className="font-semibold text-gray-900">#{schedule.batch_id}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Total Jobs:</span>
+                  <span className="font-semibold text-purple-600">{schedule.total_jobs}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500">Severity Score:</span>
+                  <span className="font-semibold text-orange-600">{schedule.optimization_metrics.total_severity_score}</span>
+                </div>
+              </div>
+            )}
           </div>
+          
+          {/* 에러 메시지 */}
+          {error && (
+            <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+              <span className="material-symbols-outlined text-red-500">error</span>
+              <p className="text-red-700 font-medium">{error}</p>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-12 gap-6">
-          {/* 왼쪽: 간트 차트 */}
+          {/* 왼쪽: 스케줄 테이블 */}
           <div className="col-span-8">
             <div className="bg-white rounded-lg p-10 shadow-sm border border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900 mb-8">Master Schedule</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-8">
+                Master Schedule
+                {schedule && (
+                  <span className="ml-3 text-sm font-normal text-gray-500">
+                    {schedule.target_date} - {schedule.session_time}
+                  </span>
+                )}
+              </h2>
               
-              {/* 타임라인 헤더 */}
-              <div className="grid grid-cols-[150px_repeat(10,1fr)] gap-px text-xs text-center font-semibold text-gray-500 mb-4">
-                <div className="text-left">Resource</div>
-                <div>08:00</div>
-                <div>09:00</div>
-                <div>10:00</div>
-                <div>11:00</div>
-                <div>12:00</div>
-                <div>13:00</div>
-                <div>14:00</div>
-                <div>15:00</div>
-                <div>16:00</div>
-                <div>17:00</div>
-              </div>
-
-              {/* 용접공 스케줄 */}
-              <div className="space-y-3">
-                {/* Welder 1 */}
-                <div className="grid grid-cols-[150px_repeat(10,1fr)] gap-px items-center">
-                  <div className="font-semibold text-gray-900 text-sm">John Doe</div>
-                  <div className="col-span-10 h-14 relative bg-gray-50 rounded-xl">
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-blue-400 to-blue-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '0%', width: '10%' }}>
-                      Travel
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-gray-400 to-gray-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '10%', width: '5%' }}>
-                      Setup
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm cursor-pointer hover:shadow-md transition-shadow" style={{ left: '15%', width: '25%' }} onClick={() => setShowModal(true)}>
-                      Work: D-123
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-blue-400 to-blue-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '40%', width: '10%' }}>
-                      Travel
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '50%', width: '30%' }}>
-                      Work: D-124
-                    </div>
+              {/* 스케줄 Jobs 테이블 */}
+              {loading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-center">
+                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                    <p className="text-gray-600">Generating schedule...</p>
                   </div>
                 </div>
-
-                {/* Welder 2 */}
-                <div className="grid grid-cols-[150px_repeat(10,1fr)] gap-px items-center">
-                  <div className="font-semibold text-gray-900 text-sm">Jane Smith</div>
-                  <div className="col-span-10 h-14 relative bg-gray-50 rounded-xl">
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '5%', width: '35%' }}>
-                      Work: D-125
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-gray-400 to-gray-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '40%', width: '10%' }}>
-                      Setup
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-blue-400 to-blue-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '50%', width: '15%' }}>
-                      Travel
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '65%', width: '20%' }}>
-                      Work: D-126
-                    </div>
+              ) : !schedule ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-center">
+                    <span className="material-symbols-outlined text-gray-400 text-5xl mb-4">calendar_month</span>
+                    <p className="text-gray-600 mb-2">No schedule generated yet</p>
+                    <p className="text-sm text-gray-500">Select date and session, then click "Regenerate Schedule"</p>
                   </div>
                 </div>
-
-                {/* Welder 3 */}
-                <div className="grid grid-cols-[150px_repeat(10,1fr)] gap-px items-center">
-                  <div className="font-semibold text-gray-900 text-sm">Mike Ross</div>
-                  <div className="col-span-10 h-14 relative bg-gray-50 rounded-xl">
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-gray-400 to-gray-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '0%', width: '8%' }}>
-                      Setup
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '8%', width: '22%' }}>
-                      Work: D-127
-                    </div>
-                    <div className="absolute h-12 top-1 bg-gradient-to-r from-purple-400 to-purple-500 rounded-lg flex items-center px-3 text-xs text-white font-medium shadow-sm" style={{ left: '45%', width: '40%' }}>
-                      Work: D-128
-                    </div>
-                  </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b-2 border-gray-200">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Order</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Welder</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Defect</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Location</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Start Time</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">End Time</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Duration</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Severity</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {schedule.jobs.map((job) => (
+                        <tr key={job.job_id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-4 text-sm font-semibold text-gray-900">#{job.job_order}</td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{job.welder_name}</td>
+                          <td className="px-4 py-4 text-sm font-medium text-purple-600">
+                            D-{String(job.defect_id).padStart(5, '0')}
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{job.defect_type_name}</td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{job.location_name}</td>
+                          <td className="px-4 py-4 text-sm text-gray-600">
+                            {new Date(job.estimated_start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-600">
+                            {new Date(job.estimated_end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{job.rework_time} min</td>
+                          <td className="px-4 py-4 text-sm">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              job.severity_score >= 2.0 ? 'bg-red-100 text-red-700' :
+                              job.severity_score >= 1.0 ? 'bg-orange-100 text-orange-700' :
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {job.severity_score.toFixed(1)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-
-                {/* Welder 4 */}
-                <div className="grid grid-cols-[150px_repeat(10,1fr)] gap-px items-center">
-                  <div className="font-semibold text-gray-900 text-sm">Sarah Connor</div>
-                  <div className="col-span-10 h-14 relative bg-gray-50 rounded-xl flex items-center justify-center text-gray-400 text-sm">
-                    Unassigned
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
