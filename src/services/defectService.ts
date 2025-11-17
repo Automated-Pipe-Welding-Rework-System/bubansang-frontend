@@ -30,4 +30,13 @@ export const updateDefectStatus = async (
   return updateDefect(defectId, { status: status as 'pending' | 'in_progress' | 'completed' });
 };
 
+export const batchUpdatePriority = async (
+  priorities: Array<{ defect_id: number; priority_factor: number }>
+): Promise<any> => {
+  const response = await apiClient.patch('/api/defects/batch-priority', {
+    priorities
+  });
+  return response.data;
+};
+
 

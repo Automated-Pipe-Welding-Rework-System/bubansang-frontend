@@ -3,12 +3,16 @@
  * 백엔드 API 연동
  */
 
-import { useState } from 'react';
-import { optimizeSchedule } from '../services/scheduleService';
-import type { ScheduleResponse } from '../types/api';
+import { useState, useEffect } from 'react';
+import { optimizeScheduleORTools, querySchedule, confirmSchedule, getWelderTicket } from '../services/scheduleService';
+import { batchUpdatePriority } from '../services/defectService';
+import type { ScheduleResponse, ScheduleJob } from '../types/api';
+import ScheduleTimeline from '../components/ScheduleTimeline';
 
 export default function ScheduleCockpit() {
   const [showModal, setShowModal] = useState(false);
+  const [selectedWelderId, setSelectedWelderId] = useState<number | null>(null);
+  const [welderTicket, setWelderTicket] = useState<any>(null);
   
   // 날짜/세션 선택
   const [targetDate, setTargetDate] = useState<string>(
@@ -16,17 +20,48 @@ export default function ScheduleCockpit() {
   );
   const [targetSession, setTargetSession] = useState<'morning' | 'afternoon' | 'night'>('morning');
   
+  // 뷰 모드 (표 또는 타임라인)
+  const [viewMode, setViewMode] = useState<'table' | 'timeline'>('table');
+  
   // 스케줄 상태
   const [schedule, setSchedule] = useState<ScheduleResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  
+  // 드래그 앤 드롭 상태
+  const [draggedJobIndex, setDraggedJobIndex] = useState<number | null>(null);
+  const [priorityChanges, setPriorityChanges] = useState<Map<number, number>>(new Map());
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  // 날짜/세션 변경 시 기존 스케줄 로드
+  useEffect(() => {
+    loadExistingSchedule();
+  }, [targetDate, targetSession]);
+  
+  const loadExistingSchedule = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await querySchedule(targetDate, targetSession);
+      setSchedule(response);
+    } catch (error: any) {
+      // 404는 정상 (스케줄이 없는 경우)
+      if (error.response?.status !== 404) {
+        console.error('Error loading schedule:', error);
+      }
+      setSchedule(null);
+    } finally {
+      setLoading(false);
+    }
+  };
   
   // 스케줄 생성
   const handleGenerateSchedule = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await optimizeSchedule(targetDate, targetSession);
+      const response = await optimizeScheduleORTools(targetDate, targetSession);
       setSchedule(response);
     } catch (error: any) {
       setError(error.response?.data?.error || 'Failed to generate schedule');
@@ -34,6 +69,151 @@ export default function ScheduleCockpit() {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // 스케줄 확정
+  const handleConfirmSchedule = async () => {
+    if (!schedule) return;
+    
+    setConfirming(true);
+    try {
+      await confirmSchedule(schedule.batch_id);
+      // 다시 로드하여 상태 업데이트
+      await loadExistingSchedule();
+      alert('스케줄이 확정되었습니다!');
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to confirm schedule');
+      console.error('Error confirming schedule:', error);
+    } finally {
+      setConfirming(false);
+    }
+  };
+  
+  // 작업자 티켓 조회
+  const handleShowWelderTicket = async (welderId: number) => {
+    if (schedule?.status !== 'confirmed') {
+      alert('확정된 스케줄만 작업 지시서를 볼 수 있습니다.');
+      return;
+    }
+    
+    try {
+      const ticket = await getWelderTicket(welderId, targetDate, targetSession);
+      setWelderTicket(ticket);
+      setSelectedWelderId(welderId);
+      setShowModal(true);
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Failed to load welder ticket');
+      console.error('Error loading welder ticket:', error);
+    }
+  };
+  
+  // 드래그 시작
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    if (schedule?.status === 'confirmed') {
+      e.preventDefault();
+      return;
+    }
+    setDraggedJobIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  
+  // 드롭
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedJobIndex === null || draggedJobIndex === dropIndex || !schedule) return;
+    
+    const draggedJob = schedule.jobs[draggedJobIndex];
+    const defectId = draggedJob.defect_id;
+    
+    // 위로 이동: priority = 10
+    // 아래로 이동: priority = 1
+    let newPriority: number;
+    if (dropIndex < draggedJobIndex) {
+      // 위로 이동
+      newPriority = 10;
+    } else {
+      // 아래로 이동
+      newPriority = 1;
+    }
+    
+    const newChanges = new Map(priorityChanges);
+    newChanges.set(defectId, newPriority);
+    setPriorityChanges(newChanges);
+    setHasChanges(true);
+    
+    setDraggedJobIndex(null);
+  };
+  
+  // 드래그 오버
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+  
+  // 우선순위 변경 적용 및 재스케줄링
+  const handleApplyPriorityChanges = async () => {
+    if (!hasChanges || priorityChanges.size === 0) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // 우선순위 일괄 업데이트
+      const priorities = Array.from(priorityChanges.entries()).map(([defect_id, priority_factor]) => ({
+        defect_id,
+        priority_factor
+      }));
+      
+      await batchUpdatePriority(priorities);
+      
+      // 재스케줄링
+      const response = await optimizeScheduleORTools(targetDate, targetSession);
+      setSchedule(response);
+      
+      // 상태 초기화
+      setPriorityChanges(new Map());
+      setHasChanges(false);
+      
+      alert('우선순위가 적용되고 재스케줄링되었습니다!');
+    } catch (error: any) {
+      setError(error.response?.data?.error || 'Failed to apply priority changes');
+      console.error('Error applying priority changes:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 우선순위 변경 취소
+  const handleCancelPriorityChanges = () => {
+    setPriorityChanges(new Map());
+    setHasChanges(false);
+  };
+
+  // 세션별 시작/종료 시간 계산
+  const getSessionTimes = () => {
+    const date = new Date(targetDate + 'T00:00:00');
+    let startHour = 9;
+    let endHour = 12;
+
+    if (targetSession === 'morning') {
+      startHour = 9;
+      endHour = 12;
+    } else if (targetSession === 'afternoon') {
+      startHour = 13;
+      endHour = 18;
+    } else if (targetSession === 'night') {
+      startHour = 19;
+      endHour = 22;
+    }
+
+    const sessionStart = new Date(date);
+    sessionStart.setHours(startHour, 0, 0, 0);
+
+    const sessionEnd = new Date(date);
+    sessionEnd.setHours(endHour, 0, 0, 0);
+
+    return { sessionStart, sessionEnd };
   };
 
   return (
@@ -44,17 +224,17 @@ export default function ScheduleCockpit() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-4xl font-bold text-gray-900 mb-2">Schedule Cockpit</h1>
-              <p className="text-gray-500">AI-powered schedule management</p>
+              <p>Schedule Management</p>
             </div>
             <div className="flex gap-3">
               <button 
                 onClick={handleGenerateSchedule}
                 disabled={loading}
-                className="px-6 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-xl font-semibold hover:bg-purple-50 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-3 bg-white border-2 border-[#4975D4] text-[#4975D4] rounded-xl font-semibold hover:bg-[#DCE5F9] transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <>
-                    <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-purple-600"></div>
+                    <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-[#4975D4]"></div>
                     Generating...
                   </>
                 ) : (
@@ -64,17 +244,35 @@ export default function ScheduleCockpit() {
                   </>
                 )}
               </button>
-              <button className="px-6 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-semibold hover:from-purple-600 hover:to-purple-700 transition-all shadow-sm flex items-center gap-2">
-                <span className="material-symbols-outlined">check_circle</span>
-                Confirm & Dispatch
+              <button 
+                onClick={handleConfirmSchedule}
+                disabled={!schedule || schedule.status === 'confirmed' || confirming}
+                className="px-6 py-3 bg-[#4975D4] text-white rounded-xl font-semibold hover:bg-[#DCE5F9] transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {confirming ? (
+                  <>
+                    <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Confirming...
+                  </>
+                ) : schedule?.status === 'confirmed' ? (
+                  <>
+                    <span className="material-symbols-outlined">check_circle</span>
+                    Confirmed
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined">check_circle</span>
+                    Confirm & Dispatch
+                  </>
+                )}
               </button>
             </div>
           </div>
           
           {/* 날짜/세션 선택 */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 flex items-center gap-6">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 flex items-center gap-6 mb-15">
             <div className="flex items-center gap-3">
-              <label className="text-sm font-semibold text-gray-700">Target Date:</label>
+              <label className="text-sm font-semibold text-gray-700">Date</label>
               <input
                 type="date"
                 value={targetDate}
@@ -90,31 +288,31 @@ export default function ScheduleCockpit() {
                   onClick={() => setTargetSession('morning')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     targetSession === 'morning'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      ? 'bg-[#4975D4] hover:bg-[#DCE5F9] text-white'
+                      : 'bg-[#DCE5F9] hover:bg-[#BCD5F7] text-white'
                   }`}
                 >
-                  Morning (09:00-12:00)
+                  Morning (9AM-12PM)
                 </button>
                 <button
                   onClick={() => setTargetSession('afternoon')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     targetSession === 'afternoon'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      ? 'bg-[#4975D4] hover:bg-[#DCE5F9] text-white'
+                      : 'bg-[#DCE5F9] hover:bg-[#BCD5F7] text-white'
                   }`}
                 >
-                  Afternoon (13:00-18:00)
+                  Afternoon (13PM-18PM)
                 </button>
                 <button
                   onClick={() => setTargetSession('night')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     targetSession === 'night'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      ? 'bg-[#4975D4] hover:bg-[#DCE5F9] text-white'
+                      : 'bg-[#DCE5F9] hover:bg-[#BCD5F7] text-white'
                   }`}
                 >
-                  Night (19:00-22:00)
+                  Night (19PM-22PM)
                 </button>
               </div>
             </div>
@@ -127,7 +325,7 @@ export default function ScheduleCockpit() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-gray-500">Total Jobs:</span>
-                  <span className="font-semibold text-purple-600">{schedule.total_jobs}</span>
+                  <span className="font-semibold text-[#4975D4]">{schedule.total_jobs}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-gray-500">Severity Score:</span>
@@ -144,26 +342,83 @@ export default function ScheduleCockpit() {
               <p className="text-red-700 font-medium">{error}</p>
             </div>
           )}
+          
+          {/* 우선순위 변경 알림 */}
+          {hasChanges && schedule?.status !== 'confirmed' && (
+            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-blue-500">info</span>
+                  <p className="text-blue-700 font-medium">
+                    {priorityChanges.size}개 결함의 우선순위가 변경되었습니다. 재스케줄링을 적용하시겠습니까?
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCancelPriorityChanges}
+                    className="px-4 py-2 bg-white border border-blue-300 text-blue-600 rounded-lg font-medium hover:bg-blue-50 transition-all"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleApplyPriorityChanges}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-all flex items-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">refresh</span>
+                    재스케줄링 적용
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-12 gap-6">
+        <div className="grid grid-cols-12 gap-6 mb-10">
           {/* 왼쪽: 스케줄 테이블 */}
-          <div className="col-span-8">
+          <div className="col-span-12">
             <div className="bg-white rounded-lg p-10 shadow-sm border border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900 mb-8">
-                Master Schedule
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-xl font-bold text-gray-900">
+                  Master Schedule
+                  <p></p>
+                  {schedule && (
+                    <span className="ml-3 text-sm font-normal text-gray-500">
+                      {schedule.target_date}, {schedule.session_time}
+                    </span>
+                  )}
+                </h2>
+                {/* 표/시간 토글 */}
                 {schedule && (
-                  <span className="ml-3 text-sm font-normal text-gray-500">
-                    {schedule.target_date} - {schedule.session_time}
-                  </span>
+                  <div className="flex gap-2 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setViewMode('table')}
+                      className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                        viewMode === 'table'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      표
+                    </button>
+                    <button
+                      onClick={() => setViewMode('timeline')}
+                      className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                        viewMode === 'timeline'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      시간
+                    </button>
+                  </div>
                 )}
-              </h2>
+              </div>
               
               {/* 스케줄 Jobs 테이블 */}
               {loading ? (
                 <div className="flex items-center justify-center py-20">
                   <div className="text-center">
-                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#4975D4] mb-4"></div>
                     <p className="text-gray-600">Generating schedule...</p>
                   </div>
                 </div>
@@ -175,160 +430,258 @@ export default function ScheduleCockpit() {
                     <p className="text-sm text-gray-500">Select date and session, then click "Regenerate Schedule"</p>
                   </div>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+              ) : viewMode === 'table' ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
                     <thead className="bg-gray-50 border-b-2 border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Order</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Welder</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Defect</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Type</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Location</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Start Time</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">End Time</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Duration</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Severity</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Order</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Welder</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Defect</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Type</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Location</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Start Time</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">End Time</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Duration</th>
+                        <th className="px-8 py-6 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Severity</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {schedule.jobs.map((job) => (
-                        <tr key={job.job_id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-4 text-sm font-semibold text-gray-900">#{job.job_order}</td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{job.welder_name}</td>
-                          <td className="px-4 py-4 text-sm font-medium text-purple-600">
-                            D-{String(job.defect_id).padStart(5, '0')}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{job.defect_type_name}</td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{job.location_name}</td>
-                          <td className="px-4 py-4 text-sm text-gray-600">
-                            {new Date(job.estimated_start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-gray-600">
-                            {new Date(job.estimated_end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{job.rework_time} min</td>
-                          <td className="px-4 py-4 text-sm">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                              job.severity_score >= 2.0 ? 'bg-red-100 text-red-700' :
-                              job.severity_score >= 1.0 ? 'bg-orange-100 text-orange-700' :
-                              'bg-yellow-100 text-yellow-700'
-                            }`}>
-                              {job.severity_score.toFixed(1)}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {schedule.jobs.map((job, index) => {
+                        const hasPriorityChange = priorityChanges.has(job.defect_id);
+                        const newPriority = priorityChanges.get(job.defect_id);
+                        
+                        return (
+                          <tr 
+                            key={job.job_id} 
+                            draggable={schedule.status !== 'confirmed'}
+                            onDragStart={(e) => handleDragStart(e, index)}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDrop(e, index)}
+                            className={`hover:bg-gray-50 transition-colors ${
+                              schedule.status !== 'confirmed' ? 'cursor-move' : ''
+                            } ${
+                              hasPriorityChange ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                            } ${
+                              draggedJobIndex === index ? 'opacity-50' : ''
+                            }`}
+                          >
+                            <td className="px-8 py-8 text-base font-semibold text-gray-900">
+                              <div className="flex items-center gap-2">
+                                {schedule.status !== 'confirmed' && (
+                                  <span className="material-symbols-outlined text-gray-400 text-sm">drag_indicator</span>
+                                )}
+                                #{job.job_order}
+                                {hasPriorityChange && (
+                                  <span className="ml-2 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                                    Priority: {newPriority}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-8 py-8 text-base">
+                              <button
+                                onClick={() => handleShowWelderTicket(job.welder_id)}
+                                className={`text-gray-600 hover:text-[#4975D4] font-medium transition-colors ${
+                                  schedule.status === 'confirmed' ? 'cursor-pointer underline decoration-dotted' : 'cursor-default'
+                                }`}
+                                disabled={schedule.status !== 'confirmed'}
+                              >
+                                {job.welder_name}
+                              </button>
+                            </td>
+                            <td className="px-8 py-8 text-base font-medium text-[#4975D4]">
+                              D-{String(job.defect_id).padStart(5, '0')}
+                            </td>
+                            <td className="px-8 py-8 text-base text-gray-600">{job.defect_type_name}</td>
+                            <td className="px-8 py-8 text-base text-gray-600">{job.location_name}</td>
+                            <td className="px-8 py-8 text-base text-gray-600">
+                              {new Date(job.estimated_start_time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </td>
+                            <td className="px-8 py-8 text-base text-gray-600">
+                              {new Date(job.estimated_end_time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </td>
+                            <td className="px-8 py-8 text-base text-gray-600">{job.rework_time} min</td>
+                            <td className="px-8 py-8 text-base">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                job.severity_score >= 2.0 ? 'bg-red-100 text-red-700' :
+                                job.severity_score >= 1.0 ? 'bg-orange-100 text-orange-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {job.severity_score.toFixed(1)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* 오른쪽: 대기 결함 큐 */}
-          <div className="col-span-4">
-            <div className="bg-white rounded-lg p-8 shadow-sm border border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Pending Defects</h2>
-              
-              {/* 검색 */}
-              <div className="relative mb-4">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                  search
-                </span>
-                <input
-                  type="search"
-                  placeholder="Search defects..."
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                </>
+              ) : (
+                <ScheduleTimeline
+                  jobs={schedule.jobs}
+                  sessionStart={getSessionTimes().sessionStart}
+                  sessionEnd={getSessionTimes().sessionEnd}
                 />
-              </div>
-
-              {/* 결함 카드 */}
-              <div className="space-y-3">
-                {[
-                  { id: 'D-129', location: 'Zone B', type: 'T-Joint', priority: 'High' },
-                  { id: 'D-130', location: 'Zone E', type: 'Lap Joint', priority: 'Medium' },
-                  { id: 'D-131', location: 'Zone F', type: 'Butt Weld', priority: 'Low' },
-                  { id: 'D-132', location: 'Zone G', type: 'Corner Joint', priority: 'Medium' },
-                ].map((defect) => (
-                  <div
-                    key={defect.id}
-                    className="p-4 rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 hover:shadow-sm transition-all cursor-grab"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <p className="font-bold text-gray-900">{defect.id}</p>
-                      <span
-                        className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                          defect.priority === 'High'
-                            ? 'bg-red-100 text-red-700'
-                            : defect.priority === 'Medium'
-                            ? 'bg-orange-100 text-orange-700'
-                            : 'bg-green-100 text-green-700'
-                        }`}
-                      >
-                        {defect.priority}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-1">{defect.location}</p>
-                    <p className="text-xs text-gray-500">{defect.type}</p>
-                    <div className="mt-3">
-                      <label className="text-xs text-gray-500 block mb-1">Priority (1-10)</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        defaultValue={defect.priority === 'High' ? 8 : defect.priority === 'Medium' ? 5 : 3}
-                        className="w-full px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 모달 */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-gray-900">Work Order: John Doe</h3>
+      {/* 작업 지시서 모달 */}
+      {showModal && welderTicket && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            {/* 헤더 - 파란색 그라데이션 배경 */}
+            <div className="bg-gradient-to-r from-[#4975D4] to-[#8cace5] px-8 py-6 rounded-t-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full backdrop-blur-sm flex items-center justify-center">
+                    <span className="material-symbols-outlined text-white text-3xl">assignment</span>
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-white mb-1">
+                      작업 지시서
+                    </h3>
+                    <p className="text-sm text-white/90">
+                      {welderTicket.target_date} | {welderTicket.session_time}
+                    </p>
+                  </div>
+                </div>
                 <button
-                  onClick={() => setShowModal(false)}
-                  className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
+                  onClick={() => {
+                    setShowModal(false);
+                    setWelderTicket(null);
+                  }}
+                  className="w-10 h-10 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
                 >
-                  <span className="material-symbols-outlined text-gray-400">close</span>
+                  <span className="material-symbols-outlined text-white">close</span>
                 </button>
               </div>
-              <div className="space-y-3 mb-6">
-                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-100">
-                  <p className="text-sm font-semibold text-purple-900">1. Travel to Zone B (7 min)</p>
+            </div>
+
+            <div className="p-8">
+              {/* 작업자 정보 - 좌우 분할 레이아웃 적용 */}
+              <div className="bg-white rounded-xl mb-8 overflow-hidden flex">
+                
+                {/* 왼쪽: 프로필*/}
+                <div className="w-1/3 p-6 flex flex-col items-center justify-center">
+                  <div className="w-24 h-24 rounded-full bg-[#4975D4] flex items-center justify-center shadow-lg mb-4 ring-4 ring-white">
+                    <span className="material-symbols-outlined text-white text-5xl">person</span>
+                  </div>
+                  <h4 className="text-2xl font-bold text-gray-900 mb-1">{welderTicket.welder_name}</h4>
+                  <div className="px-3 py-1 bg-white rounded-full text-xs font-medium text-gray-500">
+                    ID: {welderTicket.welder_id}
+                  </div>
                 </div>
-                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-100">
-                  <p className="text-sm font-semibold text-purple-900">2. SMAW Setup (10 min)</p>
-                </div>
-                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-100">
-                  <p className="text-sm font-semibold text-purple-900">3. Execute Rework on D-123 (2.5 hrs)</p>
-                </div>
-                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-100">
-                  <p className="text-sm font-semibold text-purple-900">4. Travel to Zone E (5 min)</p>
-                </div>
-                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-100">
-                  <p className="text-sm font-semibold text-purple-900">5. Execute Rework on D-124 (3 hrs)</p>
+
+                {/* 오른쪽: 상세 스탯 및 스킬 */}
+                <div className="w-2/3 p-6 flex flex-col justify-center">
+                  {/* 상단: 퇴근시간 & 작업수 */}
+                  <div className="grid grid-cols-2 gap-6 mb-6">
+                    <div className="bg-white rounded-xl p-4 mb-6">
+                      <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide flex items-center gap-1">
+                        <span className="material-symbols-outlined text-sm">logout</span> 퇴근 시간
+                      </p>
+                      <p className="text-xl font-bold text-[#4975D4]">{welderTicket.shift_end_time}</p>
+                    </div>
+                    <div className="bg-white rounded-xl p-4 mb-6">
+                      <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide flex items-center gap-1">
+                        <span className="material-symbols-outlined text-sm">build</span> 총 작업 수
+                      </p>
+                      <p className="text-xl font-bold text-[#4975D4]">{welderTicket.total_jobs}개</p>
+                    </div>
+                  </div>
+
+                  {/* 하단: 스킬 */}
+                  {welderTicket.skills && welderTicket.skills.length > 0 && (
+                    <div>
+                      <p className="text-sm text-gray-400 mb-2 font-semibold uppercase tracking-wide">보유 스킬</p>
+                      <div className="flex flex-wrap gap-2">
+                        {welderTicket.skills.map((skill: any, idx: number) => (
+                          <span key={idx} className="px-5 py-3 bg-gray-100 rounded-md text-xs font-bold text-gray-600 border border-gray-200">
+                            {skill.skill_name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="flex gap-3">
-                <button className="flex-1 px-4 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-xl font-semibold hover:bg-purple-50 transition-all flex items-center justify-center gap-2">
-                  <span className="material-symbols-outlined">print</span>
-                  Print
-                </button>
-                <button className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl font-semibold hover:from-purple-600 hover:to-purple-700 transition-all flex items-center justify-center gap-2">
-                  <span className="material-symbols-outlined">send_to_mobile</span>
-                  Send to Device
-                </button>
+
+              {/* 작업 목록 */}
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="material-symbols-outlined text-[#4975D4]">format_list_numbered</span>
+                  <h5 className="text-xl font-bold text-gray-900">작업 순서</h5>
+                </div>
+                <div className="space-y-3">
+                  {welderTicket.jobs.map((job: any, index: number) => (
+                    <div key={job.job_id} className="bg-[#DCE5F9] rounded-xl p-5 border-2 border-gray-100 hover:border-[#8cace5] transition-all hover:shadow-md">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-[#4975D4] to-[#8cace5] text-white flex items-center justify-center font-bold text-base shadow-md">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-lg font-bold text-gray-900">
+                              결함 D-{String(job.defect_id).padStart(5, '0')}
+                            </p>
+                            <span className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm ${
+                              job.severity_score >= 2.0 ? 'bg-red-100 text-red-700 border border-red-200' :
+                              job.severity_score >= 1.0 ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                              'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                            }`}>
+                              심각도 {job.severity_score.toFixed(1)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[#4975D4] text-sm">category</span>
+                              <div>
+                                <span className="text-xs text-gray-500">타입</span>
+                                <p className="font-semibold text-gray-900 text-sm">{job.defect_type_name}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[#4975D4] text-sm">location_on</span>
+                              <div>
+                                <span className="text-xs text-gray-500">위치</span>
+                                <p className="font-semibold text-gray-900 text-sm">{job.location_name}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[#4975D4] text-sm">schedule</span>
+                              <div>
+                                <span className="text-xs text-gray-500">시작</span>
+                                <p className="font-semibold text-gray-900 text-sm">
+                                  {new Date(job.estimated_start_time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[#4975D4] text-sm">event</span>
+                              <div>
+                                <span className="text-xs text-gray-500">종료</span>
+                                <p className="font-semibold text-gray-900 text-sm">
+                                  {new Date(job.estimated_end_time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-[#DCE5F9]/30 rounded-lg px-3 py-2 inline-flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[#4975D4] text-sm">timer</span>
+                            <span className="text-sm text-gray-600">작업 시간:</span>
+                            <span className="font-bold text-[#4975D4] text-sm">{job.rework_time}분</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

@@ -1,6 +1,5 @@
 /**
  * 페이지 1: AI 결함 분석 및 등록 (QC Portal)
- * 세련된 디자인으로 재구성
  */
 
 import { useState } from 'react';
@@ -189,7 +188,7 @@ export default function QCPortal() {
             </button>
             <button
               disabled={!formEnabled}
-              className="px-8 py-3 bg-white border-2 border-purple-500 text-purple-600 rounded-xl font-semibold hover:bg-purple-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-8 py-3 bg-white border-2 border-[#4975D4] text-[#4975D4] rounded-xl font-semibold hover:bg-[#DCE5F9] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Generate RFI/NCR Report
             </button>

@@ -29,4 +29,36 @@ export const getSchedule = async (batchId: number): Promise<ScheduleResponse> =>
   return response.data;
 };
 
+export const querySchedule = async (
+  targetDate: string,
+  targetSession: 'morning' | 'afternoon' | 'night'
+): Promise<ScheduleResponse> => {
+  const response = await apiClient.get<ScheduleResponse>('/api/schedules/query', {
+    params: {
+      target_date: targetDate,
+      target_session: targetSession,
+    },
+  });
+  return response.data;
+};
+
+export const confirmSchedule = async (batchId: number): Promise<any> => {
+  const response = await apiClient.patch(`/api/schedules/${batchId}/confirm`);
+  return response.data;
+};
+
+export const getWelderTicket = async (
+  welderId: number,
+  targetDate: string,
+  targetSession: 'morning' | 'afternoon' | 'night'
+): Promise<any> => {
+  const response = await apiClient.get(`/api/schedules/welder/${welderId}/ticket`, {
+    params: {
+      target_date: targetDate,
+      target_session: targetSession,
+    },
+  });
+  return response.data;
+};
+
 

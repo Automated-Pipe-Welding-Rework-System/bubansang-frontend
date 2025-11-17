@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { getDefects, updateDefectPriority } from '../services/defectService';
 import { getWelders, updateWelderStatus } from '../services/welderService';
 import type { DefectItem, WelderItem } from '../types/api';
+import { tailwindColors } from '../styles/colors';
 
 type TabType = 'defects' | 'welders';
 
@@ -109,8 +110,8 @@ export default function Management() {
                 onClick={() => setActiveTab('defects')}
                 className={`px-8 py-4 rounded-lg font-semibold text-base transition-all ${
                   activeTab === 'defects'
-                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-[#4975D4] hover:bg-[#DCE5F9] text-white'
+                    : 'bg-[#DCE5F9] hover:bg-[#BCD5F7] text-white'
                 }`}
               >
                 Managed Defects
@@ -119,27 +120,11 @@ export default function Management() {
                 onClick={() => setActiveTab('welders')}
                 className={`px-8 py-4 rounded-lg font-semibold text-base transition-all ${
                   activeTab === 'welders'
-                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-[#4975D4] hover:bg-[#DCE5F9] text-white'
+                    : 'bg-[#DCE5F9] hover:bg-[#BCD5F7] text-white'
                 }`}
               >
                 Welder Status
-              </button>
-</div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                  search
-                </span>
-                <input
-                  type="search"
-                  placeholder="Search..."
-                  className="pl-12 pr-4 py-3 w-72 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-</div>
-              <button className="px-6 py-3.5 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg font-semibold text-base hover:from-purple-600 hover:to-purple-700 transition-all shadow-sm flex items-center gap-2 whitespace-nowrap">
-                <span className="material-symbols-outlined text-xl">add</span>
-                New Defect
               </button>
 </div>
 </div>
@@ -151,7 +136,7 @@ export default function Management() {
             {defectsLoading ? (
               <div className="flex items-center justify-center py-20">
                 <div className="text-center">
-                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#4975D4] mb-4"></div>
                   <p className="text-gray-600">Loading defects...</p>
                 </div>
               </div>
@@ -260,7 +245,7 @@ export default function Management() {
             {weldersLoading ? (
               <div className="flex items-center justify-center py-20">
                 <div className="text-center">
-                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mb-4"></div>
+                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#4975D4] mb-4"></div>
                   <p className="text-gray-600">Loading welders...</p>
                 </div>
               </div>
@@ -308,8 +293,8 @@ export default function Management() {
                           <td className="px-8 py-8 text-base text-gray-600">
                             <div className="flex flex-wrap gap-1">
                               {welder.skills.slice(0, 2).map((skill, idx) => (
-                                <span key={idx} className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
-                                  {skill.process}
+                                <span key={idx} className="px-2 py-1 bg-[#DCE5F9] text-[#4975D4] rounded text-xs">
+                                  {skill.skill_name}
                                 </span>
                               ))}
                               {welder.skill_count > 2 && (

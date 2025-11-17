@@ -134,13 +134,13 @@ export default function LiveMonitor() {
                 </div>
               </div>
               <div className="grid grid-cols-4 grid-rows-2 gap-4 h-48">
-                <div className="col-span-1 row-span-2 flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 transition-colors cursor-pointer">
+                <div className="col-span-1 row-span-2 flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-[#8cace5] transition-colors cursor-pointer">
                   <div className="text-center">
                     <p className="text-gray-700 font-semibold">Zone A</p>
                     <p className="text-xs text-gray-400 mt-1">Idle</p>
                   </div>
                 </div>
-                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 transition-colors cursor-pointer">
+                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-[#8cace5] transition-colors cursor-pointer">
                   <p className="text-gray-700 font-semibold text-sm">Zone B</p>
                 </div>
                 <div className="flex flex-col items-center justify-center rounded-2xl bg-red-50 border-2 border-red-300 shadow-sm cursor-pointer">
@@ -148,18 +148,18 @@ export default function LiveMonitor() {
                   <p className="text-red-700 font-semibold text-sm">Zone C</p>
                   <p className="text-xs text-red-600 font-medium">2 Pending</p>
                 </div>
-                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 transition-colors cursor-pointer">
+                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-[#8cace5] transition-colors cursor-pointer">
                   <p className="text-gray-700 font-semibold text-sm">Zone D</p>
                 </div>
-                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 transition-colors cursor-pointer">
+                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-[#8cace5] transition-colors cursor-pointer">
                   <p className="text-gray-700 font-semibold text-sm">Zone E</p>
                 </div>
-                <div className="flex flex-col items-center justify-center rounded-2xl bg-purple-50 border-2 border-purple-300 shadow-sm cursor-pointer">
-                  <span className="material-symbols-outlined text-purple-500 text-xl mb-1">engineering</span>
-                  <p className="text-purple-700 font-semibold text-sm">Zone F</p>
-                  <p className="text-xs text-purple-600 font-medium">1 Working</p>
+                <div className="flex flex-col items-center justify-center rounded-2xl bg-[#DCE5F9] border-2 border-[#8cace5] shadow-sm cursor-pointer">
+                  <span className="material-symbols-outlined text-[#4975D4] text-xl mb-1">engineering</span>
+                  <p className="text-[#4975D4] font-semibold text-sm">Zone F</p>
+                  <p className="text-xs text-[#4975D4] font-medium">1 Working</p>
                 </div>
-                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-purple-300 transition-colors cursor-pointer">
+                <div className="flex items-center justify-center rounded-2xl bg-gray-50 border border-gray-200 hover:border-[#8cace5] transition-colors cursor-pointer">
                   <p className="text-gray-700 font-semibold text-sm">Zone G</p>
                 </div>
               </div>
