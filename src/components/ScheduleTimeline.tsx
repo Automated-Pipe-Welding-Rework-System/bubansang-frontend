@@ -58,24 +58,39 @@ export default function ScheduleTimeline({ jobs, sessionStart, sessionEnd }: Sch
         const jobStart = new Date(job.estimated_start_time);
         const jobEnd = new Date(job.estimated_end_time);
 
-        // 이전 작업과의 간격 확인 (대기 또는 이동)
+        // 첫 번째 작업인지 확인
+        const isFirstJob = index === 0;
+        
+        // 이전 작업과의 간격 확인 (대기 또는 이동/셋업)
         if (jobStart.getTime() > lastEndTime.getTime()) {
           const gapMinutes = (jobStart.getTime() - lastEndTime.getTime()) / 60000;
           
-          if (gapMinutes > 2) { // 2분 이상 간격이면 이동으로 간주
-            // 위치가 다르면 이동, 같으면 대기
+          if (isFirstJob) {
+            // 첫 작업은 항상 이동/셋업으로 표시 (A구역 → D구역 → 작업위치)
+            segments.push({
+              type: 'move',
+              label: `A구역 출발 → 장비셋업 → ${job.location_name}`,
+              start: lastEndTime,
+              end: jobStart,
+            });
+          } else if (gapMinutes > 2) {
+            // 2분 이상 간격이면 이동 또는 대기
             const prevJob = sortedJobs[index - 1];
             const isMoving = prevJob && prevJob.location_id !== job.location_id;
             
             segments.push({
               type: isMoving ? 'move' : 'idle',
-              label: isMoving 
-                ? `이동 → ${job.location_name}` 
+              label: isMoving
+                ? `이동 / 장비셋업 → ${job.location_name}` 
                 : `대기 (${Math.round(gapMinutes)}분)`,
               start: lastEndTime,
               end: jobStart,
             });
           }
+        } else if (isFirstJob && jobStart.getTime() === lastEndTime.getTime()) {
+          // 예외: 첫 작업이 세션 시작과 동시에 시작하는 경우 (오류 상황)
+          // 이 경우에도 최소한의 이동/셋업 시간을 표시
+          console.warn(`Warning: First job starts at session start time for welder ${job.welder_id}`);
         }
 
         // 작업 추가
@@ -255,15 +270,15 @@ export default function ScheduleTimeline({ jobs, sessionStart, sessionEnd }: Sch
       <div className="mt-6 flex items-center gap-6 justify-center">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-[#FBBF24] rounded border border-gray-300"></div>
-          <span className="text-sm text-gray-700 font-medium">작업 (Work)</span>
+          <span className="text-sm text-gray-700 font-medium">작업</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-[#4975D4] rounded border border-gray-300"></div>
-          <span className="text-sm text-gray-700 font-medium">이동 (Move)</span>
+          <span className="text-sm text-gray-700 font-medium">이동 / 장비셋업</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-[#D3D3D3] rounded border border-gray-300"></div>
-          <span className="text-sm text-gray-700 font-medium">대기 (Idle)</span>
+          <span className="text-sm text-gray-700 font-medium">대기</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-0.5 h-6 bg-red-500"></div>

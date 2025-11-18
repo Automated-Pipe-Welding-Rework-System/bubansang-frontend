@@ -108,28 +108,33 @@ export default function ScheduleCockpit() {
   };
   
   // 드래그 시작
-  const handleDragStart = (e: React.DragEvent, index: number) => {
+  const handleDragStart = (e: React.DragEvent, jobId: number, displayIndex: number) => {
     if (schedule?.status === 'confirmed') {
       e.preventDefault();
       return;
     }
-    setDraggedJobIndex(index);
+    setDraggedJobIndex(displayIndex);
+    e.dataTransfer.setData('jobId', jobId.toString());
     e.dataTransfer.effectAllowed = 'move';
   };
   
   // 드롭
-  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+  const handleDrop = (e: React.DragEvent, _dropJobId: number, dropDisplayIndex: number) => {
     e.preventDefault();
     
-    if (draggedJobIndex === null || draggedJobIndex === dropIndex || !schedule) return;
+    if (draggedJobIndex === null || draggedJobIndex === dropDisplayIndex || !schedule) return;
     
-    const draggedJob = schedule.jobs[draggedJobIndex];
+    const draggedJobId = parseInt(e.dataTransfer.getData('jobId'));
+    const draggedJob = schedule.jobs.find(j => j.job_id === draggedJobId);
+    
+    if (!draggedJob) return;
+    
     const defectId = draggedJob.defect_id;
     
     // 위로 이동: priority = 10
     // 아래로 이동: priority = 1
     let newPriority: number;
-    if (dropIndex < draggedJobIndex) {
+    if (dropDisplayIndex < draggedJobIndex) {
       // 위로 이동
       newPriority = 10;
     } else {
@@ -448,7 +453,9 @@ export default function ScheduleCockpit() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {schedule.jobs.map((job, index) => {
+                      {[...schedule.jobs]
+                        .sort((a, b) => new Date(a.estimated_start_time).getTime() - new Date(b.estimated_start_time).getTime())
+                        .map((job, index) => {
                         const hasPriorityChange = priorityChanges.has(job.defect_id);
                         const newPriority = priorityChanges.get(job.defect_id);
                         
@@ -456,9 +463,9 @@ export default function ScheduleCockpit() {
                           <tr 
                             key={job.job_id} 
                             draggable={schedule.status !== 'confirmed'}
-                            onDragStart={(e) => handleDragStart(e, index)}
+                            onDragStart={(e) => handleDragStart(e, job.job_id, index)}
                             onDragOver={handleDragOver}
-                            onDrop={(e) => handleDrop(e, index)}
+                            onDrop={(e) => handleDrop(e, job.job_id, index)}
                             className={`hover:bg-gray-50 transition-colors ${
                               schedule.status !== 'confirmed' ? 'cursor-move' : ''
                             } ${
@@ -472,7 +479,7 @@ export default function ScheduleCockpit() {
                                 {schedule.status !== 'confirmed' && (
                                   <span className="material-symbols-outlined text-gray-400 text-sm">drag_indicator</span>
                                 )}
-                                #{job.job_order}
+                                #{index + 1}
                                 {hasPriorityChange && (
                                   <span className="ml-2 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
                                     Priority: {newPriority}
